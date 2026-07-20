@@ -19,9 +19,14 @@ import {
 } from './doc.js'
 import { openDB } from '../idb.js'
 
+// Default to the same self-hosted PeerServer druthers (the crdtbus reference
+// app) uses in production, rather than the public PeerJS cloud — the cloud is
+// best-effort and caps concurrent peers. Tradeoff: it runs on Render's free
+// tier, so a cold start can delay the *first* connection by ~10-50s; the app
+// is local-first, so play continues and sync catches up once it's awake.
 const SIGNALING_HOST =
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_PEERJS_HOST) ||
-  '0.peerjs.com'
+  'drpeer.onrender.com'
 
 // Topic namespace is versioned (see doc.js DOC_VERSION) so a future breaking
 // document-format change can move to tts2- without old clients corrupting it.
