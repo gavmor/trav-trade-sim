@@ -12,7 +12,7 @@
  */
 
 const DB_NAME    = 'traveller-trade-sim'
-const DB_VERSION = 2
+const DB_VERSION = 3
 
 export function openDB() {
   return new Promise((resolve, reject) => {
@@ -27,6 +27,9 @@ export function openDB() {
       }
       if (!db.objectStoreNames.contains('sector-cache')) {
         db.createObjectStore('sector-cache', { keyPath: 'id' })
+      }
+      if (!db.objectStoreNames.contains('campaign-docs')) {
+        db.createObjectStore('campaign-docs', { keyPath: 'code' })
       }
     }
     req.onsuccess = e => resolve(e.target.result)
