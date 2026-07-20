@@ -1,29 +1,16 @@
-// HTTP client for the Cloudflare Worker API.
-// All stores and components import this instead of supabase.
+// Local API client. Same interface and response envelope as the old HTTP
+// client for the Cloudflare Worker, but requests are dispatched to the
+// in-browser backend (src/lib/backend/), which reads and writes the p2p
+// campaign document instead of a remote database. All stores and components
+// import this exactly as before.
 
-const BASE = import.meta.env.VITE_API_URL
-const TIMEOUT_MS = 15000
+import { dispatch } from './backend/index.js'
 
 function getToken() {
   try {
     const raw = localStorage.getItem('tts_session')
     return raw ? (JSON.parse(raw).token ?? null) : null
   } catch { return null }
-}
-
-function authHeaders(token) {
-  const headers = { 'Content-Type': 'application/json' }
-  if (token) headers['Authorization'] = `Bearer ${token}`
-  return headers
-}
-
-function buildUrl(path, params) {
-  const url = `${BASE}${path}`
-  if (!params) return url
-  const qs = new URLSearchParams(
-    Object.entries(params).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)])
-  ).toString()
-  return qs ? `${url}?${qs}` : url
 }
 
 // Set by auth.js at startup so a 401 on an authenticated request can log the
@@ -34,34 +21,32 @@ export function setUnauthorizedHandler(fn) {
   onUnauthorized = fn
 }
 
+function cleanParams(params) {
+  if (!params) return {}
+  return Object.fromEntries(
+    Object.entries(params).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]),
+  )
+}
+
 async function request(method, path, body, params) {
-  if (!BASE) return { data: null, error: 'API not configured — check VITE_API_URL', errorKind: 'config' }
   const token = getToken()
-  let res
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
+  let result
   try {
-    res = await fetch(buildUrl(path, params), {
-      method,
-      headers: authHeaders(token),
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-      signal: controller.signal,
+    result = await dispatch(method, path, {
+      query: cleanParams(params),
+      body,
+      token,
     })
   } catch (e) {
-    if (e.name === 'AbortError') {
-      return { data: null, error: 'Request timed out', errorKind: 'timeout' }
-    }
-    return { data: null, error: e.message ?? 'Network error', errorKind: 'network' }
-  } finally {
-    clearTimeout(timer)
+    return { data: null, error: e.message ?? 'Local backend error', errorKind: 'network' }
   }
-  const json = await res.json().catch(() => ({}))
-  if (!res.ok) {
-    if (res.status === 401 && token && onUnauthorized) onUnauthorized()
+
+  if (result.status < 200 || result.status >= 300) {
+    if (result.status === 401 && token && onUnauthorized) onUnauthorized()
     // Spread the full error body so callers can inspect locked_until, attempts_remaining, etc.
-    return { data: null, ...json, error: json.error ?? `HTTP ${res.status}`, errorKind: 'http' }
+    return { data: null, ...result.body, error: result.body.error ?? `HTTP ${result.status}`, errorKind: 'http' }
   }
-  return { data: json.data ?? null, error: null }
+  return { data: result.body.data ?? null, error: null }
 }
 
 export const api = {

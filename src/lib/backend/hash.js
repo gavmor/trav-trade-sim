@@ -1,8 +1,8 @@
 // PBKDF2 password hashing via the Web Crypto API (no npm dependency).
-// Format stored in DB: "pbkdf2:<iterations>:<saltHex>:<hashHex>"
+// Format stored in the campaign doc: "pbkdf2:<iterations>:<saltHex>:<hashHex>"
+// Moved verbatim from the retired Cloudflare Worker (worker/src/lib/hash.js)
+// so existing PIN hashes remain verifiable after a campaign doc is imported.
 
-// 10k iterations fits within the Workers free-tier 10ms CPU limit.
-// PBKDF2-SHA256 at this count is still ~100× harder to brute-force than a raw SHA256.
 const ITERATIONS = 10_000
 const HASH_ALG   = 'SHA-256'
 
