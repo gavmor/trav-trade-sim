@@ -13,12 +13,13 @@ test.describe('Login page — static rendering', () => {
     await expect(page.locator('h1')).toContainText('Traveller Trade Simulator')
   })
 
-  test('shows three mode tabs', async ({ page }) => {
+  test('shows four mode tabs', async ({ page }) => {
     const tabs = page.locator('.tab')
-    await expect(tabs).toHaveCount(3)
+    await expect(tabs).toHaveCount(4)
     await expect(tabs.nth(0)).toContainText('Sign In')
     await expect(tabs.nth(1)).toContainText('Join Campaign')
     await expect(tabs.nth(2)).toContainText('New Campaign')
+    await expect(tabs.nth(3)).toContainText('Reset PIN')
   })
 
   test('Sign In is the active tab on load', async ({ page }) => {
@@ -99,5 +100,37 @@ test.describe('Login page — client-side validation', () => {
     const codeInput = page.locator('input[placeholder*="SPINWARD"]')
     await codeInput.fill('spinward-42')
     await expect(codeInput).toHaveValue('SPINWARD-42')
+  })
+})
+
+// ── Full-stack campaign creation (p2p CRDT backend, no server) ────────────────
+// Exercises the real in-browser stack: PBKDF2 PIN hashing, the op-log CRDT
+// document, IndexedDB persistence, and crdtbus (which tolerates the signaling
+// server being unreachable by falling back to local-only operation).
+
+test.describe('Campaign creation — local p2p stack', () => {
+  test('creates a campaign and shows the recovery code, then lands on the map', async ({ page }) => {
+    await page.goto('/')
+    await page.locator('.tab').nth(2).click()
+
+    await page.fill('input[placeholder*="Spinward Marches"]', 'E2E CAMPAIGN')
+    await page.fill('input[placeholder*="SPINWARD"]', `E2E-${Date.now()}`)
+    await page.fill('input[placeholder*="Referee"]', 'Cmdr E2E')
+
+    const pins = page.locator('input[type="password"]')
+    await pins.nth(0).fill('1234')
+    await pins.nth(1).fill('1234')
+
+    await page.locator('button[type="submit"]').click()
+
+    // Creation waits briefly for peers (duplicate-code check) before writing.
+    const dialog = page.locator('[role="alertdialog"]')
+    await expect(dialog).toBeVisible({ timeout: 15000 })
+    await expect(dialog.locator('.code-text')).not.toBeEmpty()
+
+    await dialog.locator('.ack-check').check()
+    await dialog.locator('.continue-btn').click()
+    await expect(page).toHaveURL(/\/$|#\/$/, { timeout: 10000 })
+    await expect(page.locator('[role="alertdialog"]')).toHaveCount(0)
   })
 })
