@@ -28,53 +28,80 @@ The **Traveller game rules and trade mechanics** implemented here are based on C
 |---|---|
 | Frontend | Vue 3 (Composition API + SFC), Pinia, Vue Router |
 | Build | Vite |
-| API | Cloudflare Workers (Hono v4) |
-| Database | Cloudflare D1 (SQLite at the edge) |
+| Multiplayer sync | [crdtbus](https://github.com/Taliesinsoftworks/crdtbus) — p2p CRDT sync over WebRTC (PeerJS) |
+| Persistence | IndexedDB (per-campaign op-log document in each player's browser) |
 | Charts | lightweight-charts (TradingView OSS) |
-| Hosting | GitHub Pages (frontend) + Cloudflare Workers (API) |
+| Hosting | GitHub Pages (static frontend — no backend) |
+
+## How multiplayer works
+
+There is no server and no database. Each campaign is a CRDT document — an
+append-only log of operations (trades, bookings, tick advances, …) — stored in
+every participant's browser (IndexedDB) and synced peer-to-peer over WebRTC by
+a vendored copy of [crdtbus](https://github.com/Taliesinsoftworks/crdtbus)
+(`src/lib/crdt/`). The campaign code is the sync topic: everyone who enters
+the same code merges into the same document. Peers discover each other through
+a PeerJS signaling server (defaults to the public PeerJS cloud; override with
+`VITE_PEERJS_HOST`); actual game data flows browser-to-browser.
+
+Consequences worth knowing:
+
+- **Someone must be online to sync from.** Joining or logging into a campaign
+  from a new browser requires at least one other campaign member to have the
+  app open — their browser is where the campaign lives.
+- **Treat the campaign code like an invite link.** PINs still gate which
+  character you play, but they're enforced client-side; anyone with the code
+  can read campaign data.
+- **Offline works.** With no peers online you can keep playing; your ops are
+  buffered and everything reconciles when peers reconnect (conflicting edits
+  resolve deterministically — credit changes are additive, field edits are
+  last-writer-wins).
 
 ## Setup
 
 ### Prerequisites
 
 - Node.js 20+
-- A [Cloudflare](https://cloudflare.com) account (free tier is sufficient)
-- Wrangler CLI: `npm install -g wrangler`
 
 ### Local development
 
-Two terminals are required — one for the Worker API, one for the Vite dev server.
-
 ```bash
-# Terminal 1 — API (uses the remote D1 database)
-cd worker
-npx wrangler dev --remote
-
-# Terminal 2 — frontend
 npm install
 npm run dev
 ```
 
-The frontend `.env` file points `VITE_API_URL` at `http://localhost:8787` by default.
-
 ### Deploy
 
 ```bash
-# Deploy Worker
-cd worker && npx wrangler deploy
-
-# Deploy frontend (or push to master — GitHub Actions handles it)
+# Push to master — GitHub Actions deploys to GitHub Pages
 npm run build
 ```
 
-Add `VITE_API_URL=https://<your-worker>.workers.dev` as a GitHub Actions repository secret before deploying the frontend.
+### Verifying two-browser sync manually
+
+1. `npm run dev`, open the app in a normal window, create a campaign.
+2. Open the same URL in a private/incognito window (a separate browser
+   context), pick **Join Campaign**, and enter the same campaign code.
+3. Trade or advance the tick in one window — the other window's calendar,
+   credits, and market panels update within a few seconds.
 
 ## Project Structure
 
 ```
 src/
   lib/
-    api.js               # HTTP client (replaces @supabase/supabase-js)
+    api.js               # Local API client — same interface as the old HTTP client
+    backend/             # Route handlers (ported from the Cloudflare Worker)
+      router.js          # Path matching + auth guards
+      campaigns.js       # Campaign lifecycle, login, PIN recovery
+      ships.js           # Trade, passengers, fuel, mail, freight, debts
+      ...                # calendar, market, referee, reports, organizations
+      session.js         # Local (browser-only) session tokens
+      hash.js            # PBKDF2 PIN hashing (Web Crypto API)
+    crdt/
+      bus.js             # Vendored crdtbus (p2p sync over PeerJS/WebRTC)
+      doc.js             # Campaign op-log CRDT: merge, total order, materialize
+      store.js           # Open campaign, IndexedDB persistence, remote updates
     traveller-data.js    # CT lookup tables, Book 2 goods, Book 7 price tables
     traveller-helpers.js # UWP decode, sector parsing, route parsing
     trade-engine-ct7.js  # CT Book 7 trade rules (pure functions)
@@ -84,23 +111,4 @@ src/
     style.css            # Dark space theme
   App.vue
   main.js
-worker/
-  src/
-    index.js             # Hono app entry point + CORS
-    routes/              # campaigns, ships, market, referee, auth, reports
-    middleware/auth.js   # Bearer token validation
-    lib/hash.js          # PBKDF2 PIN hashing (Web Crypto API)
-  wrangler.toml
-d1/
-  schema.sql             # Full D1 (SQLite) schema
-  002_sessions.sql       # Sessions table migration
-  003_crew_stateroom.sql # has_stateroom column on crew
-  004_obligations.sql    # Unifies mail_contracts + passenger_manifests into obligations
-  005_ship_templates.sql # ship_templates table + ships.market_value
-  006_ship_debts.sql     # ship_debts + debt_payments tables
-  007_ownership.sql      # ship_ownership + organizations + organization_members tables
-  008_org_officers.sql   # organization_officers table (multi-officer authorization)
-  009_org_financials.sql # dues, disbursement, organization_ownership (Corp/Fleet Phase 2)
-  010_mgt2022_trade_rules.sql # MgT2022 ruleset (Basic Passage, Freight, traffic_snapshots)
-  011_schema_ledger.sql  # schema_migrations ledger — powers GET /api/health drift detection
 ```

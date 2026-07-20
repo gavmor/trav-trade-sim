@@ -45,7 +45,8 @@ import('./stores/theme.js').then(({ useThemeStore }) => {
   useThemeStore().init()
 })
 
-// One-time D1 schema-drift check. Import after mount so Pinia is ready.
-import('./lib/health-check.js').then(({ checkSchemaHealth }) => {
-  checkSchemaHealth()
+// Join the campaign's p2p swarm and refresh stores when other players' ops
+// arrive. Import after mount so Pinia is ready.
+import('./lib/live-refresh.js').then(({ initLiveRefresh }) => {
+  initLiveRefresh()
 })

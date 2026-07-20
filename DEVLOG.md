@@ -2,6 +2,75 @@
 
 ---
 
+## 2026-07-20 — Serverless rewrite: Cloudflare Workers + D1 → p2p CRDT sync (crdtbus)
+
+### Goal
+Remove the app's own backend entirely. Campaign state now lives in every
+participant's browser and syncs peer-to-peer over WebRTC via
+[crdtbus](https://github.com/Taliesinsoftworks/crdtbus). The Traveller Map
+API remains the only remote dependency.
+
+### Architecture
+- **One organizing idea:** every mutation is an *op* carrying precomputed
+  *effects* (`put`/`init`/`set`/`add`/`del`/`clear`); the campaign document is
+  the set of all ops (`src/lib/crdt/doc.js`). Merge = set union (commutative,
+  associative, idempotent — exactly crdtbus's `merge` contract). All peers
+  materialize tables by folding effects in a total order (lamport, agentId,
+  opId), so identical op sets ⇒ identical state.
+- **Why effects, not row-level LWW:** this is a game economy. Two crew members
+  spending from the same ship concurrently must *both* debit credits —
+  additive `add` effects make that conflict-free; field edits (`set`) resolve
+  last-writer-wins under the total order, which is what two racing HTTP POSTs
+  did against D1 anyway.
+- **INSERT OR IGNORE parity:** rows that used UNIQUE constraints (market/
+  traffic snapshots, monthly/annual rollups, skills upserts) use deterministic
+  composite-key ids, so concurrent generation on two peers converges to one row.
+- **Worker routes → `src/lib/backend/`:** same paths, guards, and response
+  shapes as the Hono routes, dispatched in-process. `src/lib/api.js` keeps its
+  exact interface, so no store or component changed its data access.
+- **Sessions are local** (`localStorage`): a "session" is just this browser
+  remembering which character it authenticated as. PINs (PBKDF2, unchanged
+  format) are verified client-side against hashes in the shared document.
+- **Persistence:** the op log persists per campaign in IndexedDB
+  (`campaign-docs` store, DB v3) — replaces D1.
+- **Topic = campaign code** (`tts1-<CODE>`, versioned prefix). PeerJS
+  signaling host defaults to the public cloud; override with
+  `VITE_PEERJS_HOST`.
+- **crdtbus is vendored** (`src/lib/crdt/bus.js`, MIT) because the npm package
+  lives on the GitHub Package Registry, which needs an authenticated .npmrc —
+  unacceptable friction for a public GitHub Pages app.
+- **Live refresh:** remote ops trigger store reloads (`src/lib/live-refresh.js`)
+  — the calendar/ship/market panels now follow other players in near-real-time.
+
+### Trust model (honest and explicit)
+Anyone with the campaign code can read and write campaign data — the code is
+an invite link. PINs gate character identity in the UI, not data access; the
+referee role is enforced client-side. Fine for a co-op game among friends; not
+a security boundary.
+
+### Known limitations
+- Joining/logging in from a new browser needs ≥1 campaign member online (the
+  campaign lives in members' browsers). Offline play works; ops buffer and
+  reconcile on reconnect.
+- Global campaign-code uniqueness can only be checked against peers that are
+  online at creation time (2.5s window). Pick distinctive codes.
+- Login lockout counters sync p2p but are advisory, like everything else.
+- The op log grows monotonically (~hundreds of bytes/op). Fine for years of
+  weekly ticks; snapshot/compaction is a future optimization.
+
+### Verification
+- 420 unit/component tests green (`npx vitest run`), including new suites:
+  CRDT merge/order/effect properties (`tests/crdt-doc.test.js`), full backend
+  flows through the api surface (`tests/backend-flow.test.js`), and two-context
+  convergence incl. concurrent spends and snapshot races
+  (`tests/crdt-sync.test.js`).
+- 15 Playwright e2e green, including a new full-stack test that creates a
+  campaign in real Chromium (PBKDF2 + CRDT + IndexedDB + crdtbus with the
+  signaling server unreachable).
+- `vite build` green. Manual two-browser check documented in README.
+
+---
+
 ## 2026-06-11 — Initial build
 
 ### Goal
