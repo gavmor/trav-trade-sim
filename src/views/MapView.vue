@@ -527,15 +527,19 @@ const tick   = useTickStore()
 const ship   = useShipStore()
 const router = useRouter()
 
-// The sidebar is always visible on desktop (the toggle only renders at narrow
-// widths, and `.collapsed` only takes effect there). On mobile it starts
-// collapsed so the world detail gets the screen.
+// ── Narrow-viewport (mobile) detection ───────────────────────────────────────
+// ≤640px: the sidebar starts collapsed so the world detail gets the screen,
+// the chart moves from the inline split into a bottom sheet, and the market
+// table switches to contextual Compare selection.
 const NARROW_VIEWPORT_QUERY = '(max-width: 640px)'
-function isNarrowViewport() {
-  return typeof window.matchMedia === 'function'
-    && window.matchMedia(NARROW_VIEWPORT_QUERY).matches
-}
-const sidebarOpen = ref(!isNarrowViewport())
+const narrowMq = typeof window.matchMedia === 'function'
+  ? window.matchMedia(NARROW_VIEWPORT_QUERY)
+  : null
+const isNarrow = ref(narrowMq?.matches ?? false)
+function onNarrowChange(e) { isNarrow.value = e.matches }
+narrowMq?.addEventListener?.('change', onNarrowChange)
+
+const sidebarOpen = ref(!isNarrow.value)
 
 const sectorFilter   = ref('')
 const filteredSectors = computed(() => {
@@ -549,17 +553,6 @@ const shipTab      = ref('cargo')
 const selectedGood   = ref(null)
 const chartedGoods   = ref(new Set())
 const buyLoading     = ref(false)
-
-// ── Narrow-viewport (mobile) detection ───────────────────────────────────────
-// ≤640px the chart moves from the inline split into a bottom sheet and the
-// market table switches to contextual Compare selection.
-const NARROW_VIEWPORT_QUERY = '(max-width: 640px)'
-const narrowMq = typeof window.matchMedia === 'function'
-  ? window.matchMedia(NARROW_VIEWPORT_QUERY)
-  : null
-const isNarrow = ref(narrowMq?.matches ?? false)
-function onNarrowChange(e) { isNarrow.value = e.matches }
-narrowMq?.addEventListener('change', onNarrowChange)
 
 const chartSheetOpen = ref(false)
 const sheetInset     = ref(0)   // visible sheet height, so the table can pad past it
@@ -733,7 +726,7 @@ onUnmounted(() => {
   document.removeEventListener('touchmove', doResizeTouch)
   document.removeEventListener('touchend',  stopResizeTouch)
   document.removeEventListener('keydown',  handleGlobalKey)
-  narrowMq?.removeEventListener('change', onNarrowChange)
+  narrowMq?.removeEventListener?.('change', onNarrowChange)
 })
 
 // ── Global keyboard shortcuts ─────────────────────────────────────────────────
@@ -792,9 +785,9 @@ watch(() => map.selectedWorld, (world) => {
 function onWorldSelect(world) {
   map.selectWorld(world)
   // On mobile the sidebar covers the detail area, so picking a world implies
-  // "show me that world" — collapse to reveal it. Checked live (not the value
-  // cached at mount) so rotations/resizes are respected.
-  if (isNarrowViewport()) sidebarOpen.value = false
+  // "show me that world" — collapse to reveal it. isNarrow tracks the media
+  // query live, so rotations/resizes are respected.
+  if (isNarrow.value) sidebarOpen.value = false
 }
 
 function onGoodSelect(row) {
