@@ -840,6 +840,7 @@ header {
   font-size: 1rem;
   color: var(--code);
   letter-spacing: 0.08em;
+  white-space: nowrap;
 }
 
 .date-sub {
